@@ -5,8 +5,13 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // Algunos plugins Android/Capacitor pueden declarar repositorios a nivel
+    // de proyecto durante la configuración. PREFER_SETTINGS evita que eso
+    // provoque un fallo de Gradle y mantiene Google/Maven Central como fuentes
+    // principales definidas aquí.
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
