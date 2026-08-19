@@ -48,18 +48,23 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Gradle 8.2
+      # Gradle se ejecutará mediante el Wrapper incluido en el repositorio.
+      # Esto garantiza que CI use exactamente la versión declarada por el proyecto.
+      - name: Configure Gradle Wrapper
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.2'
 
       - name: Build Debug APK
         working-directory: android
-        run: gradle assembleDebug --stacktrace --no-daemon
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --version
+          ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Build Release APK
         working-directory: android
-        run: gradle assembleRelease --stacktrace --no-daemon
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Sign Release APK
         id: sign_apk
