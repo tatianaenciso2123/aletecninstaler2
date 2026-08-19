@@ -48,22 +48,29 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # Gradle se ejecutará mediante el Wrapper incluido en el repositorio.
-      # Esto garantiza que CI use exactamente la versión declarada por el proyecto.
-      - name: Configure Gradle Wrapper
+      - name: Configure Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      # El repositorio contiene gradle-wrapper.properties, pero falta gradle-wrapper.jar.
+      # Generamos el Wrapper antes de usar ./gradlew para evitar
+      # org.gradle.wrapper.GradleWrapperMain ClassNotFoundException.
+      - name: Generate Gradle Wrapper 8.2
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.2 --distribution-type all
+          chmod +x ./gradlew
+          ./gradlew --version
 
       - name: Build Debug APK
         working-directory: android
         run: |
-          chmod +x ./gradlew
-          ./gradlew --version
           ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Build Release APK
         working-directory: android
         run: |
-          chmod +x ./gradlew
           ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Sign Release APK
