@@ -13,7 +13,3 @@ buildscript {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
-
-tasks.register('clean', Delete) {
-    delete rootProject.buildDir
-}
