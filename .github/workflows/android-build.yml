@@ -18,6 +18,9 @@ on:
         required: false
         default: 'Compilación automática de APK para ALE TECNINSTALER S.A.S.'
 
+permissions:
+  contents: write
+
 jobs:
   build-and-sign-apk:
     name: Build & Sign Android APK
@@ -33,13 +36,15 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '20'
+          cache: npm
 
       - name: Install Dependencies and Build Web Assets
         run: |
           npm install --no-audit --no-fund
           npm run build
+          test -d dist
           mkdir -p android/app/src/main/assets
-          cp -rf dist/* android/app/src/main/assets/
+          cp -rf dist/. android/app/src/main/assets/
           echo "Web assets successfully compiled and synced to Android assets."
 
       - name: Set up Java JDK 17
@@ -47,13 +52,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: gradle
 
       - name: Configure Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.2'
 
-      # El repositorio contiene gradle-wrapper.properties, pero falta gradle-wrapper.jar.
+      # El repositorio puede no contener gradle-wrapper.jar.
       # Generamos el Wrapper antes de usar ./gradlew para evitar
       # org.gradle.wrapper.GradleWrapperMain ClassNotFoundException.
       - name: Generate Gradle Wrapper 8.2
@@ -66,7 +72,7 @@ jobs:
       - name: Build Debug APK
         working-directory: android
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew clean assembleDebug --stacktrace --no-daemon
 
       - name: Build Release APK
         working-directory: android
@@ -78,7 +84,7 @@ jobs:
         run: |
           set -e
           mkdir -p android/app/build/outputs/apk/release/signed
-          RELEASE_APK=$(find android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)
+          RELEASE_APK=$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)
 
           if [ -z "$RELEASE_APK" ]; then
             echo "No se encontró la APK Release para firmar."
@@ -96,7 +102,7 @@ jobs:
               --out android/app/build/outputs/apk/release/signed/ALE_TECNINSTALER_Release_Signed.apk \
               "$RELEASE_APK"
           else
-            echo "No hay keystore de producción configurado. Se conservará la APK Release generada por Gradle."
+            echo "No hay keystore de producción configurado. Se conservará la APK Release firmada con la clave de debug para instalación y pruebas."
             cp "$RELEASE_APK" android/app/build/outputs/apk/release/signed/ALE_TECNINSTALER_Release_Signed.apk
           fi
 
@@ -118,19 +124,24 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # En cada push exitoso a main se crea una Release descargable.
+      # Los tags v* conservan su nombre original.
       - name: Publish Official GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}
           files: |
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/release/signed/*.apk
-          name: "ALE TECNINSTALER Android Release ${{ github.ref_name }}"
+          name: "ALE TECNINSTALER Android Release ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}"
           body: |
             ### Nueva versión de ALE TECNINSTALER
 
             APK Release lista para instalación en Android.
             También se incluye la APK Debug para pruebas.
+
+            Compilación automática desde la rama main.
           draft: false
           prerelease: false
           generate_release_notes: true
