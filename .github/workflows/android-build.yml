@@ -1,0 +1,159 @@
+name: Android APK Build and Release CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Notas de la versión para la compilación'
+        required: false
+        default: 'Compilación automática de APK para ALE TECNINSTALER S.A.S.'
+
+jobs:
+  build-and-sign-apk:
+    name: Build & Sign Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Descargar el código fuente del repositorio
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Configurar entorno de Node.js para compilar assets web
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 3. Instalar dependencias, compilar bundle web y sincronizar con Android Assets
+      - name: Install Dependencies and Build Web Assets
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          mkdir -p android/app/src/main/assets
+          cp -rf dist/* android/app/src/main/assets/
+          echo "Web assets successfully compiled and synced to Android assets."
+
+      # 4. Configurar Java JDK 17
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 5. Configurar la caché de Gradle para acelerar compilaciones futuras
+      - name: Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # 6. Conceder permisos de ejecución al wrapper de Gradle
+      - name: Grant Execute Permissions for Gradlew
+        run: chmod +x android/gradlew
+
+      # 7. Compilar APK en modo Debug
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace
+
+      # 8. Compilar APK en modo Release
+      - name: Build Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --stacktrace
+
+      # 9. Firmar el APK de Release
+      - name: Sign Release APK
+        id: sign_apk
+        run: |
+          mkdir -p android/app/build/outputs/apk/release/signed
+          UNSIGNED_APK=$(find android/app/build/outputs/apk/release -name "*.apk" -not -name "*signed*" | head -n 1)
+
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "==> Firmando con Keystore de Producción desde GitHub Secrets..."
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > /tmp/release.keystore
+            
+            ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+              --ks /tmp/release.keystore \
+              --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
+              --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+              --key-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
+              --out android/app/build/outputs/apk/release/signed/ALE_TECNINSTALER_Release_Signed.apk \
+              "$UNSIGNED_APK"
+          else
+            echo "==> Generando Keystore temporal para firma de Release..."
+            keytool -genkey -v -keystore /tmp/ci_release.jks \
+              -alias ale_tecninstaler \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass Tecninstaller2026! -keypass Tecninstaller2026! \
+              -dname "CN=ALE TECNINSTALER, OU=Mobile, O=ALE TECNINSTALER SAS, L=Bogota, ST=Cundinamarca, C=CO"
+            
+            ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+              --ks /tmp/ci_release.jks \
+              --ks-pass pass:Tecninstaller2026! \
+              --ks-key-alias ale_tecninstaler \
+              --key-pass pass:Tecninstaller2026! \
+              --out android/app/build/outputs/apk/release/signed/ALE_TECNINSTALER_Release_Signed.apk \
+              "$UNSIGNED_APK"
+          fi
+
+          echo "apk_signed_path=android/app/build/outputs/apk/release/signed/ALE_TECNINSTALER_Release_Signed.apk" >> $GITHUB_OUTPUT
+
+      # 10. Subir APK Debug como artefacto de GitHub Actions
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALE-TECNINSTALER-Debug-APK
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      # 11. Subir APK Release Firmado como artefacto de GitHub Actions
+      - name: Upload Signed Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALE-TECNINSTALER-Signed-Release-APK
+          path: android/app/build/outputs/apk/release/signed/*.apk
+          retention-days: 30
+
+      # 12. Crear publicación oficial en GitHub Releases cuando se haga push de una etiqueta (v*)
+      - name: Publish Official GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/signed/*.apk
+          name: "ALE TECNINSTALER Android Release ${{ github.ref_name }}"
+          body: |
+            ### 🚀 Nueva Versión de la Aplicación Android Nativa - ALE TECNINSTALER S.A.S.
+            
+            **Archivos listos para instalación en teléfonos móviles:**
+            - 📦 **APK Release Firmado**: `ALE_TECNINSTALER_Release_Signed.apk`
+            - 🛠️ **APK Debug**: Para pruebas de desarrollo
+            
+            #### 📱 Capacidades Nativas Incluidas:
+            - Aceleración por hardware para gráficos hidráulicos
+            - Acceso a cámara para fotos de órdenes e inspección con IA
+            - Soporte para micrófono en bitácora por voz
+            - Geolocalización para despacho de rutas
+            - Modo Offline con persistencia local
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
